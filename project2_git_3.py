@@ -233,9 +233,6 @@ def clean_df_for_recommender(df):
     scaler = StandardScaler()
     X_num_scaled = scaler.fit_transform(X_num_imputed)
 
-    ### For text part of vector
-    # Ở đây đã load tfidf_matrix nên không xử lý phần text nữa
-
     ### Tạo vector đầu vào bằng cách kết hợp vector TF-IDF và array num col (X_num_scaled)
     # from scipy.sparse import csr_matrix, hstack
     # Chuyển array X_num_scaled thành matrix dạng sparse (ko store các giá trị 0)
@@ -321,18 +318,28 @@ def clean_df_for_clustering(df_cluster):
 # ==========================================================
 # LOAD EVERYTHING (CACHED)
 # ==========================================================
-# 1) Load models
+# ==========================================================
+# LOAD EVERYTHING (CACHED)
+# ==========================================================
+
+@st.cache_data
+def get_clean_recommender_data():
+    df_raw = load_raw_data()
+    return clean_df_for_recommender(df_raw.copy())
+
+@st.cache_data
+def get_cluster_data():
+    df_raw = load_raw_data()
+    df_cluster = clean_df_for_clustering(df_raw.copy())
+    df_cluster, num_cols = compute_clusters(df_cluster)
+    return df_cluster, num_cols
+
+# Load models (already cached)
 vectorizer, tfidf_matrix, kmeans, scaler, ohe, imputer, pca = load_models()
 
-# 2) Load raw data
-df_raw = load_raw_data()
-
-# 3) Prepare recommender dataset
-df_clean, X_final = clean_df_for_recommender(df_raw.copy())
-
-# 4) Prepare clustering dataset
-df_cluster = clean_df_for_clustering(df_raw.copy())
-df_cluster, num_cols = compute_clusters(df_cluster)
+# Load cleaned datasets
+df_clean, X_final = get_clean_recommender_data()
+df_cluster, num_cols = get_cluster_data()
 
 
 # ==========================================================
@@ -343,9 +350,6 @@ def preprocess_user_input(price, min_price, max_price, mileage_km, registration_
     log_price = np.log1p(price)
     X = np.array([[age, mileage_km, min_price, max_price, log_price]])
     return scaler.transform(X)
-
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
 
 def get_top_n_similar_by_content(df, X_final, title, top_n=5):
     """
@@ -363,7 +367,7 @@ def get_top_n_similar_by_content(df, X_final, title, top_n=5):
         scores (list): similarity scores
     """
 
-    # 1️⃣ Find the index of the selected bike
+    # Find the index of the selected bike
     matches = df.index[df['title'] == title]
 
     if len(matches) == 0:
@@ -371,20 +375,20 @@ def get_top_n_similar_by_content(df, X_final, title, top_n=5):
 
     idx = matches[0]
 
-    # 2️⃣ Compute cosine similarity for this single item
+    # Compute cosine similarity for this single item
     sims = cosine_similarity(X_final[idx], X_final).flatten()
 
-    # 3️⃣ Sort by similarity (descending), ignore itself
+    # Sort by similarity (descending), ignore itself
     ranked_indices = np.argsort(sims)[::-1]
 
     # Remove itself
     ranked_indices = ranked_indices[ranked_indices != idx]
 
-    # 4️⃣ Take top-N
+    # Take top-N
     top_indices = ranked_indices[:top_n]
     top_scores = sims[top_indices]
 
-    # 5️⃣ Return matching rows + scores
+    # Return matching rows + scores
     df_recommend = df.iloc[top_indices].copy()
     df_recommend['similarity_score'] = top_scores
 
@@ -420,8 +424,16 @@ st.sidebar.markdown("""
 
 st.sidebar.markdown("### Menu")   
 menu = ["Giới thiệu", "Bài toán nghiệp vụ", "Đánh giá mô hình và Báo cáo",
-        "Gợi ý mẫu xe tương tự", "Phân cụm phân khúc xe máy"]
-page = st.sidebar.selectbox("", menu)  
+        "Gợi ý mẫu xe tương tự", "Xác định phân khúc xe máy"]
+
+# page = st.sidebar.selectbox("Menu", menu, label_visibility="collapsed")
+page = st.sidebar.selectbox(
+    "Menu",
+    menu,
+    label_visibility="collapsed",
+    key="menu_select",
+    # enable full width
+)
 
 
 # ==========================================================
@@ -973,7 +985,7 @@ elif page == "Gợi ý mẫu xe tương tự":
             st.caption(f"Similarity score: {row['similarity_score']:.3f}")
 
 
-elif page == "Phân cụm phân khúc xe máy":
+elif page == "Xác định phân khúc xe máy":
     # Main page header
     st.markdown("""
     <h1 style='font-size:48px; font-weight:800; margin-bottom:8px;'>
