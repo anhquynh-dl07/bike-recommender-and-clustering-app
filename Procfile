@@ -1,1 +1,1 @@
-web: sh setup.sh && streamlit run project2_git_2.py
+web: sh setup.sh && streamlit run project2_git_3.py
